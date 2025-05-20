@@ -1,8 +1,6 @@
-# helloworld
+# 猛兽杀
 
-AstrBot 插件模板
-
-A template plugin for AstrBot plugin feature
+猛兽杀插件
 
 # 支持
 
