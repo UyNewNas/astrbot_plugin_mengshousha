@@ -21,25 +21,23 @@ GameRoleConstDict = {
     "BAWU": "阿呆",
     "HAKA": "哈卡",
     "CARNIVORE": "食肉动物",
-    "DEAD": "死神"    
+    "DEAD": "死神",
 }
-
 
 
 # name = value
 class GameRoleEnum(Enum):
-    
-    GOODMAN = list(range(0, 10+1)).append(20)
-    GOODMAN_CAN_V = [3,4,5]
+    GOODMAN = list(range(0, 10 + 1)).append(20)
+    GOODMAN_CAN_V = [3, 4, 5]
     # 普通良民
-    ORDINARY = 0 
+    ORDINARY = 0
     # 花生侠
-    PEANUT = 1 
+    PEANUT = 1
     # 法医侠
-    DOCTOR = 2 
+    DOCTOR = 2
     # 单刀侠
     ONEHIT = 3
-    # 保安侠 
+    # 保安侠
     GUARD = 4
     # 复仇侠
     REVENGE = 5
@@ -53,11 +51,11 @@ class GameRoleEnum(Enum):
     ENGINEER = 9
     # 狼外婆侠
     WOLF_OLD = 10
-    
+
     # 额外的普通良民(11-12人局启用)
     ORDINARY_EXTRA = 20
-    
-    BADMAN = list(range(11,15+1))
+
+    BADMAN = list(range(11, 15 + 1))
     # 普通杀手
     ORDINARY_KILLER = 11
     # 变脸杀手
@@ -70,9 +68,9 @@ class GameRoleEnum(Enum):
     PROFESSIONAL_KILLER = 15
     # 静音杀手
     MUTING_KILLER = 66
-    
-    NEUTRALMAN = list(range(16, 19+1))
-    NEUTRALMAN_CAN_V = [18,19]
+
+    NEUTRALMAN = list(range(16, 19 + 1))
+    NEUTRALMAN_CAN_V = [18, 19]
     # 阿呆
     BAWU = 16
     # 哈卡
@@ -81,9 +79,3 @@ class GameRoleEnum(Enum):
     CARNIVORE = 18
     # 死神
     DEAD = 19
-    
-    
-
-    
-    
-    
