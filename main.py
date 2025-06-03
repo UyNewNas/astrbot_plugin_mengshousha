@@ -1,7 +1,7 @@
 '''
 Author: slava
 Date: 2025-05-29 15:20:09
-LastEditTime: 2025-06-03 11:05:29
+LastEditTime: 2025-06-03 11:48:55
 LastEditors: ch4nslava@gmail.com
 Description: 
 
@@ -22,7 +22,7 @@ from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.core.utils.shared_preferences import SharedPreferences
 
-from . import gameRoom,gameScene,gameRoles,gameMap
+from . import game_map, game_roles, game_room, game_scene
 
 logger = logging.getLogger("MengShouSha")
 logger.setLevel(logging.INFO)
@@ -100,13 +100,14 @@ class MengShouShaPlugin(Star):
         """处理创建房间指令"""
         try:
             player_id = event.get_sender_id()
-            room_status, room_id, room_dict = gameRoom.GameRoom().create_new_room(
+            gameroom = game_room.GameRoom()
+            room_status, room_id, room_dict = gameroom.create_new_room(
                 player_id,
                 event.get_sender_name()
             )
             room_info = self._gen_room_info(room_dict)
             # fix 房主没有加入唯一列表
-            gameRoom.GameRoom().update_player_room_unique(
+            gameroom.update_player_room_unique(
                 player_id,
                 room_id 
             )
@@ -121,7 +122,7 @@ class MengShouShaPlugin(Star):
     async def view_room(self, event: AstrMessageEvent, room_id:str):
         """处理查看房间指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             if not gameroom.check_room_exist(room_id):
                 yield event.plain_result("❌ 房间不存在，请检查房间号。")
                 return
@@ -139,7 +140,7 @@ class MengShouShaPlugin(Star):
     async def dismiss_room(self, event: AstrMessageEvent, room_id:str):
         """处理解散房间指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             if not gameroom.check_room_exist(room_id):
                 yield event.plain_result("❌ 房间不存在，请检查房间号。")
                 return
@@ -162,7 +163,7 @@ class MengShouShaPlugin(Star):
     async def join_room(self, event: AstrMessageEvent, room_id:str):
         """处理加入房间指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             if not gameroom.check_room_exist(room_id):
                 yield event.plain_result("❌ 房间不存在，请检查房间号。")
                 return
@@ -213,7 +214,7 @@ class MengShouShaPlugin(Star):
     async def quit_room(self, event: AstrMessageEvent, room_id:str):
         """处理退出房间指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             # 检查房间是否存在
             if not gameroom.check_room_exist(room_id):
                 yield event.plain_result("❌ 房间不存在，请检查房间号。")
@@ -248,12 +249,12 @@ class MengShouShaPlugin(Star):
     async def start_game(self, event: AstrMessageEvent, room_id:str):
         """处理开始游戏指令"""
         try:
-            game_room = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             # 检查房间是否存在
-            if not game_room.check_room_exist(room_id):
+            if not gameroom.check_room_exist(room_id):
                 yield event.plain_result("❌ 房间不存在，请检查房间号。")
                 return
-            room = game_room.get_room(room_id)
+            room = gameroom.get_room(room_id)
             # 验证房主身份
             if event.get_sender_id() != room["owner"]:
                 yield event.plain_result("❌ 只有房主可以开始游戏。")
@@ -267,24 +268,24 @@ class MengShouShaPlugin(Star):
                 yield event.plain_result(f"❌ 当前房间人数不足（{len(room['player_ids'])}/{self.ROOM_MIN_NUM}），无法开始游戏")
                 return
             # 开始游戏
-            game_room.room_game_start(room_id)
+            gameroom.room_game_start(room_id)
             player_ids = room["player_ids"]
             player_infos = room["player_infos"]            
             logger.info(f"房间{room_id}{room['player_infos']}开始游戏")
             yield event.plain_result("🎮 游戏开始！正在分配角色，请稍候...")
-            game_scene = gameScene.GameScene()
+            gamescene = game_scene.GameScene()
             
-            status, scene_id, scene = game_scene.create_new_scene(room_id, player_ids)
-            status, role_info = game_scene.assign_role(scene_id)
+            status, scene_id, scene = gamescene.create_new_scene(room_id, player_ids)
+            status, role_info = gamescene.assign_role(scene_id)
             role_code_list = [role_code for role_code in role_info.values()]
             role_code_list.sort()
-            role_list = [gameRoles.GameRoleConstDict[gameRoles.GameRoleEnum(role_code).name] for role_code in role_code_list]
+            role_list = [game_roles.GameRoleConstDict[game_roles.GameRoleEnum(role_code).name] for role_code in role_code_list]
             role_list = ",".join(role_list)
             yield event.plain_result(f"✅ 角色分配完成！游戏已知的角色列表有:\n{role_list}\n请私聊bot查询身份\n指令: /猛 查询身份")
             
             # 初始化地图信息
-            game_map = gameMap.GameMap()
-            map_id, map = game_map.create_new_map(room_id, player_ids)
+            gamemap = game_map.GameMap()
+            map_id, map = gamemap.create_new_map(room_id, player_ids)
             yield event.plain_result(f"✅ 地图初始化完成！已将所有玩家放置在会议室。\n请私聊bot查询位置\n指令: /猛 查询位置")
             
             # # 一直等待直到玩家开始会议
@@ -310,8 +311,8 @@ class MengShouShaPlugin(Star):
         except Exception as e:
             logger.error(f"开始游戏异常: {str(e)}", exc_info=True)
             # 状态回滚
-            game_room = gameRoom.GameRoom()
-            game_room.room_game_start_fail(room_id)            
+            gameroom = game_room.GameRoom()
+            gameroom.room_game_start_fail(room_id)            
             yield event.plain_result(f"❌ 开始游戏失败，请联系管理员。")
     
     
@@ -320,7 +321,7 @@ class MengShouShaPlugin(Star):
     async def query_role(self, event: AstrMessageEvent):
         """处理查询身份指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             player_id = event.get_sender_id()
             player_name = event.get_sender_name()
             room_id = gameroom.get_player_room_unique(player_id)
@@ -340,8 +341,8 @@ class MengShouShaPlugin(Star):
             # 反查玩家在房间的编号
             player_index = player_ids.index(player_id)
             # 查询身份
-            game_scene = gameScene.GameScene() 
-            scene_id, scene = game_scene.get_scene_from_room(room_id)
+            gamescene = game_scene.GameScene() 
+            scene_id, scene = gamescene.get_scene_from_room(room_id)
             if scene_id is None or scene is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
@@ -351,8 +352,8 @@ class MengShouShaPlugin(Star):
                 return
             role_info = scene["role_info"]
             player_role_code = role_info[player_id]
-            player_role = gameRoles.GameRoleEnum(player_role_code).name
-            player_role_cn_name = gameRoles.GameRoleConstDict[player_role]
+            player_role = game_roles.GameRoleEnum(player_role_code).name
+            player_role_cn_name = game_roles.GameRoleConstDict[player_role]
             yield event.plain_result(f"🎮 房间{room_id}身份查询成功\n{player_index+1}号玩家{player_name}({player_id})的身份是：\n{player_role_cn_name}")        
         except Exception as e:
             logger.error(f"查询身份异常: {str(e)}", exc_info=True)
@@ -363,7 +364,7 @@ class MengShouShaPlugin(Star):
     async def query_position(self, event: AstrMessageEvent):
         """处理查询位置指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             player_id = event.get_sender_id()
             player_name = event.get_sender_name()
             room_id = gameroom.get_player_room_unique(player_id)
@@ -380,27 +381,27 @@ class MengShouShaPlugin(Star):
             if player_id not in player_ids:
                 yield event.plain_result("❌ 你不在这个房间里。")
                 return
-            game_scene = gameScene.GameScene()
-            scene_id, scene = game_scene.get_scene_from_room(room_id)
+            gamescene = game_scene.GameScene()
+            scene_id, scene = gamescene.get_scene_from_room(room_id)
             if scene_id is None or scene is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
             dead_info = scene["dead_info"]
             # 查询位置
-            game_map = gameMap.GameMap()
-            map_id, map = game_map.get_map_from_room(room_id)
+            gamemap = game_map.GameMap()
+            map_id, map = gamemap.get_map_from_room(room_id)
             if map_id is None or map is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
             now_node_code, now_node_name = map["players_in_map_info"][player_id]["node_code"], map["players_in_map_info"][player_id]["node_name"]
             # 查询可移动的位置
-            next_nodes = game_map.get_next_nodes(player_id, now_node_code)
+            next_nodes = gamemap.get_next_nodes(player_id, now_node_code)
             eg_first_node_code = next_nodes[0]
-            eg_first_node_name = game_map.get_node_name(eg_first_node_code)
-            next_nodes = [f"{node_code}:{game_map.get_node_name(node_code)}" for node_code in next_nodes]
+            eg_first_node_name = gamemap.get_node_name(eg_first_node_code)
+            next_nodes = [f"{node_code}:{gamemap.get_node_name(node_code)}" for node_code in next_nodes]
             next_nodes_format = ",\n".join(next_nodes)
             # 查询当前位置有哪些玩家
-            others_in_node = game_map.get_players_in_node(player_id, now_node_code)
+            others_in_node = gamemap.get_players_in_node(player_id, now_node_code)
             players_in_node = []
             players_in_game = gameroom.get_players_in_game(room_id)
             players_in_game_list = list(players_in_game)
@@ -434,7 +435,7 @@ class MengShouShaPlugin(Star):
     async def move(self, event: AstrMessageEvent, node_code_or_name: str):
         """处理移动指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             player_id = event.get_sender_id()
             player_name = event.get_sender_name()
             room_id = gameroom.get_player_room_unique(player_id)
@@ -456,8 +457,8 @@ class MengShouShaPlugin(Star):
                 yield event.plain_result(f"❌ 房间当前状态[{room['status']}]不允许移动")
                 return
             # 检查玩家是否存活
-            game_scene = gameScene.GameScene()
-            scene_id, scene = game_scene.get_scene_from_room(room_id)
+            gamescene = game_scene.GameScene()
+            scene_id, scene = gamescene.get_scene_from_room(room_id)
             if scene_id is None or scene is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
@@ -466,22 +467,22 @@ class MengShouShaPlugin(Star):
             if player_id in dead_info:
                 yield event.plain_result("❌ 你已经死亡，无法移动。")
                 return
-            game_map = gameMap.GameMap()
+            gamemap = game_map.GameMap()
             # 获得玩家当前的node
-            map_id, map = game_map.get_map_from_room(room_id)
+            map_id, map = gamemap.get_map_from_room(room_id)
             if map_id is None or map is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
             now_node_code, now_node_name = map["players_in_map_info"][player_id]["node_code"], map["players_in_map_info"][player_id]["node_name"]
             # 获得玩家可移动的位置
-            next_nodes = game_map.get_next_nodes(player_id, now_node_code)
+            next_nodes = gamemap.get_next_nodes(player_id, now_node_code)
             # 检查输入的位置是否合法
-            target_node_code, target_node_name, target_next = game_map.get_node(node_code_or_name)
+            target_node_code, target_node_name, target_next = gamemap.get_node(node_code_or_name)
             if target_node_code not in next_nodes:
                 yield event.plain_result(f"❌ 您当前位置{now_node_name}({now_node_code})无法移动到{target_node_name}({target_node_code})")
                 return
             # 移动玩家
-            if game_map.move_to_next_node(player_id, target_node_code):
+            if gamemap.move_to_next_node(player_id, target_node_code):
                 yield event.plain_result(f"🎮 移动成功\n{player_name}({player_id})移动到了{target_node_name}({target_node_code})")
             else:
                 yield event.plain_result(f"❌ 移动失败\n{player_name}({player_id})的当前位置{now_node_name}({now_node_code})")
@@ -496,7 +497,7 @@ class MengShouShaPlugin(Star):
     async def kill(self, event: AstrMessageEvent, target_player_index: str):
         """处理技能指令"""
         try:
-            gameroom = gameRoom.GameRoom()
+            gameroom = game_room.GameRoom()
             source_player_id = event.get_sender_id()
             room_id = gameroom.get_player_room_unique(source_player_id)
             # 检查玩家是否在房间里
@@ -522,8 +523,8 @@ class MengShouShaPlugin(Star):
                 yield event.plain_result(f"❌ 房间当前状态[{room['status']}]不允许使用技能")
                 return
             # 检查玩家是否存活或者是否被吃
-            game_scene = gameScene.GameScene()
-            scene_id, scene = game_scene.get_scene_from_room(room["room_id"])
+            gamescene = game_scene.GameScene()
+            scene_id, scene = gamescene.get_scene_from_room(room["room_id"])
             if scene_id is None or scene is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
@@ -540,18 +541,18 @@ class MengShouShaPlugin(Star):
             role_info = scene["role_info"]
             player_role_code = role_info[source_player_id]
             # 是否是食肉动物
-            if player_role_code == gameRoles.GameRoleEnum.CARNIVORE.value:
+            if player_role_code == game_roles.GameRoleEnum.CARNIVORE.value:
                 yield event.plain_result("❌ 食肉动物无法使用此技能，请使用吞噬技能，指令：/猛 吞噬 玩家编号")                
                 return
             # 中立刀优先判断，其实就是死神
-            if player_role_code in gameRoles.GameRoleEnum.NEUTRALMAN_CAN_V.value:
+            if player_role_code in game_roles.GameRoleEnum.NEUTRALMAN_CAN_V.value:
                 can_kill = True
             # 是否是好人刀 TODO 单刀只能出一次刀,出完不能再出,复仇只能在目击过同一房间里发生铲除事件时才能使用铲除技能
             # 但是复仇技能太难实现了默认可以出刀
-            elif player_role_code in gameRoles.GameRoleEnum.GOODMAN_CAN_V.value:
+            elif player_role_code in game_roles.GameRoleEnum.GOODMAN_CAN_V.value:
                 can_kill = True
             # 11到15是坏人
-            elif player_role_code in gameRoles.GameRoleEnum.BADMAN.value:
+            elif player_role_code in game_roles.GameRoleEnum.BADMAN.value:
                 can_kill = True
             else:
                 can_kill = False
@@ -564,13 +565,13 @@ class MengShouShaPlugin(Star):
                 yield event.plain_result("❌ 你不能对自己使用技能")
                 return
             # 检查是否在同一个node里
-            game_map = gameMap.GameMap()
-            map_id, map = game_map.get_map_from_room(room["room_id"])
+            gamemap = game_map.GameMap()
+            map_id, map = gamemap.get_map_from_room(room["room_id"])
             if map_id is None or map is None:
                 yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
                 return
             now_node_code, now_node_name = map["players_in_map_info"][source_player_id]["node_code"], map["players_in_map_info"][source_player_id]["node_name"]
-            others_in_node = game_map.get_players_in_node(source_player_id, now_node_code)
+            others_in_node = gamemap.get_players_in_node(source_player_id, now_node_code)
             if target_player_id not in others_in_node:
                 yield event.plain_result(f"❌ 目标玩家{target_player_infos}和您不在同一个位置, 铲除失败")
                 return
@@ -591,28 +592,28 @@ class MengShouShaPlugin(Star):
                 return
             
             # 击杀
-            game_scene.player_to_dead(scene_id, source_player_id, target_player_id)
+            gamescene.player_to_dead(scene_id, source_player_id, target_player_id)
             yield event.plain_result(f"🔪 成功击杀{target_player_index}号玩家:{target_player_infos}")
             # 保安的代价
             target_player_role_code = role_info[target_player_id]
-            if player_role_code == gameRoles.GameRoleEnum.GUARD.value:
+            if player_role_code == game_roles.GameRoleEnum.GUARD.value:
                 # 检查目标玩家是否是好人
                 target_player_role_code = role_info[target_player_id]
-                if target_player_role_code in gameRoles.GameRoleEnum.GOODMAN.value:
-                    game_scene.player_to_dead(scene_id, source_player_id, source_player_id)
+                if target_player_role_code in game_roles.GameRoleEnum.GOODMAN.value:
+                    gamescene.player_to_dead(scene_id, source_player_id, source_player_id)
                     yield event.plain_result("❌ 保安击杀了好人，您已自杀")
                     return
             # 食肉动物被击杀后释放被吃的玩家
-            if target_player_role_code == gameRoles.GameRoleEnum.CARNIVORE.value:
+            if target_player_role_code == game_roles.GameRoleEnum.CARNIVORE.value:
                 # 将所有被吃的玩家释放到目标玩家位置
                 for ate_player in ate_info:
                     ate_player_id = ate_player["target_player_id"]
-                    game_map.force_move_player_to_node(ate_player_id, now_node_code)
+                    gamemap.force_move_player_to_node(ate_player_id, now_node_code)
                 # 清空被吃列表
-                game_scene.clear_ate_info(scene_id)
+                gamescene.clear_ate_info(scene_id)
             # 击杀尖叫
-            elif target_player_role_code == gameRoles.GameRoleEnum.SCREAM.value:
-                game_scene.touch_body_alert(scene_id, source_player_id, target_player_id)
+            elif target_player_role_code == game_roles.GameRoleEnum.SCREAM.value:
+                gamescene.touch_body_alert(scene_id, source_player_id, target_player_id)
                 
         except Exception as e:
             logger.error(f"铲除指令异常: {str(e)}", exc_info=True)
