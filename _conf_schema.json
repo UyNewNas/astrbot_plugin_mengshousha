@@ -1,1 +1,14 @@
-{}
+{
+    "ROOM_MIN_NUM":{
+        "type":"int",
+        "default":8
+    },
+    "ROOM_MAX_NUM":{
+        "type":"int",
+        "default":12
+    },
+    "MAPS":{
+        "type":"list",
+        "default":["map1"]
+    }
+}
