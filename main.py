@@ -7,42 +7,12 @@ Description:
 
 """
 
-"""
-Author: slava
-Date: 2025-05-29 15:20:09
-LastEditTime: 2025-06-03 08:25:16
-LastEditors: ch4nslava@gmail.com
-Description: 
-
-"""
-
-import logging
 from typing import Dict, List, Optional, Set, Tuple
 
-from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
+from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
-from astrbot.core.utils.shared_preferences import SharedPreferences
-
+from astrbot.api import logger
 from . import game_map, game_roles, game_room, game_scene
-
-logger = logging.getLogger("MengShouSha")
-logger.setLevel(logging.INFO)
-handler = logging.StreamHandler()
-formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-
-# # 在main方法里,sp只负责整个猛兽杀数据的初始化和清理,不负责具体数据读写,具体读写由sp_mengshousha.py负责
-# # 猛兽杀数据的初始化
-# sp = SharedPreferences()
-# if sp.get("mengshousha") is None or sp.get("mengshousha") == {}:
-#     sp_mengshousha_dict = {
-#         "rooms": {},
-#         "player_room_unique": {},
-#         "game_scenes": {},
-#         "game_maps": {}
-#     }
-#     sp.put("mengshousha", sp_mengshousha_dict)
 
 
 @register(
@@ -109,8 +79,31 @@ class MengShouShaPlugin(Star):
     指令格式：/猛 解散房间 房间号
     指令格式：/猛 加入房间 房间号
     指令格式：/猛 退出房间 房间号
+    指令格式：/猛 开始游戏 房间号
     -------------------------------------------------------------------------------------------------------------------------------------
     """
+
+    # 在类内添加以下公共校验方法
+    # 检查房间是否存在
+    def _check_room_exist(self, event: AstrMessageEvent, room_id: str | None):
+        if room_id is None:
+            yield event.plain_result("❌ 你不在任何房间中。")
+            return False
+        gameroom = game_room.GameRoom()
+        # 检查房间是否存在
+        if not gameroom.check_room_exist(room_id):
+            yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            return False
+        return True
+
+    # 检查玩家是否在房间里
+    def _check_player_in_room(
+        self, event: AstrMessageEvent, player_id: str, player_ids: List[str]
+    ):
+        if player_id not in player_ids:
+            yield event.plain_result("❌ 你不在这个房间里。")
+            return False
+        return True
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     @meng.command("创建房间")  # type: ignore
@@ -118,9 +111,10 @@ class MengShouShaPlugin(Star):
         """处理创建房间指令"""
         try:
             player_id = event.get_sender_id()
+            group_id = event.get_group_id()
             gameroom = game_room.GameRoom()
             room_status, room_id, room_dict = gameroom.create_new_room(
-                player_id, event.get_sender_name()
+                player_id, event.get_sender_name(), group_id
             )
             room_info = self._gen_room_info(room_dict)
             # fix 房主没有加入唯一列表
@@ -132,13 +126,12 @@ class MengShouShaPlugin(Star):
             yield event.plain_result(f"❌ 创建失败，请联系管理员。")
 
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
-    @meng.command("查看房间")  # type: ignore
+    @meng.command("查询房间", alias={"查看房间"})  # type: ignore
     async def view_room(self, event: AstrMessageEvent, room_id: str):
-        """处理查看房间指令"""
+        """处理查询房间指令"""
         try:
             gameroom = game_room.GameRoom()
-            if not gameroom.check_room_exist(room_id):
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             room = gameroom.get_room(room_id)
             room_status = room["status"]
@@ -155,8 +148,7 @@ class MengShouShaPlugin(Star):
         """处理解散房间指令"""
         try:
             gameroom = game_room.GameRoom()
-            if not gameroom.check_room_exist(room_id):
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             room = gameroom.get_room(room_id)
             player_id = event.get_sender_id()
@@ -177,8 +169,7 @@ class MengShouShaPlugin(Star):
         """处理加入房间指令"""
         try:
             gameroom = game_room.GameRoom()
-            if not gameroom.check_room_exist(room_id):
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             room = gameroom.get_room(room_id)
             player_id = event.get_sender_id()
@@ -234,9 +225,7 @@ class MengShouShaPlugin(Star):
         """处理退出房间指令"""
         try:
             gameroom = game_room.GameRoom()
-            # 检查房间是否存在
-            if not gameroom.check_room_exist(room_id):
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             room = gameroom.get_room(room_id)
             player_id = event.get_sender_id()
@@ -248,9 +237,8 @@ class MengShouShaPlugin(Star):
                     "❌ 房主无法退出房间。请用解散指令解散房间：/猛 解散房间 {room_id}"
                 )
                 return
-            # 检查玩家是否在房间里
-            if player_id not in room["player_ids"]:
-                yield event.plain_result("❌ 你不在这个房间里。")
+            player_ids = room["player_ids"]
+            if not self._check_player_in_room(event, player_id, player_ids):
                 return
             # 移除玩家
             gameroom.exit_room(room_id, player_id, player_name)
@@ -273,9 +261,7 @@ class MengShouShaPlugin(Star):
         """处理开始游戏指令"""
         try:
             gameroom = game_room.GameRoom()
-            # 检查房间是否存在
-            if not gameroom.check_room_exist(room_id):
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             room = gameroom.get_room(room_id)
             # 验证房主身份
@@ -321,29 +307,27 @@ class MengShouShaPlugin(Star):
             yield event.plain_result(
                 f"✅ 地图初始化完成！已将所有玩家放置在会议室。\n请私聊bot查询位置\n指令: /猛 查询位置"
             )
-
-            # # 一直等待直到玩家开始会议
-            # while True:
-            #     if scene["status"] == "会议中":
-            #         meeting = scene["meeting"]
-            #         alert_player_id = meeting["alert_player_id"]
-            #         alert_player_index = player_ids.index(alert_player_id)
-            #         alert_player_name = player_infos[alert_player_index]
-            #         target_player_id = meeting["target_player_id"]
-            #         if target_player_id is None:
-            #             yield event.plain_result(f"玩家{alert_player_index}.{alert_player_name}({alert_player_id})说:🔈大家快来会议室！我召开了紧急会议。")
-            #         else:
-            #             target_player_index = player_ids.index(target_player_id)
-            #             target_player_name = player_infos[target_player_index]
-            #             yield event.plain_result(f"玩家{alert_player_index}.{alert_player_name}({alert_player_id})说:🔈大事不好！发现{target_player_index}.{target_player_name}({target_player_id})嗝屁了。")
-            #         yield event.plain_result(f"✅ 会议开始！投票阶段：请大家在会议内进行投票，输入/猛 投票 玩家编号")
-
         except Exception as e:
             logger.error(f"开始游戏异常: {str(e)}", exc_info=True)
             # 状态回滚
             gameroom = game_room.GameRoom()
             gameroom.room_game_start_fail(room_id)
             yield event.plain_result(f"❌ 开始游戏失败，请联系管理员。")
+
+    """
+        私聊指令集合
+        指令格式：/猛 查询身份
+        指令格式：/猛 查询位置
+        会议下指令格式：/猛 移动 位置
+        会议下指令格式：/猛 铲除 位置
+        会议下指令格式：/猛 吞噬 位置
+        会议下指令格式：/猛 感染 位置
+    """
+
+    # 开始游戏后的公共校验方法
+    def _game_not_start(self, event: AstrMessageEvent):
+        yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+        return
 
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @meng.command("查询身份")  # type: ignore
@@ -354,18 +338,12 @@ class MengShouShaPlugin(Star):
             player_id = event.get_sender_id()
             player_name = event.get_sender_name()
             room_id = gameroom.get_player_room_unique(player_id)
-            if room_id is None:
-                yield event.plain_result("❌ 你不在任何房间中。")
-                return
-            # 校验房间是否存在
-            if gameroom.check_room_exist(room_id) is False:
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             # 检查玩家是否在房间里
             room = gameroom.get_room(room_id)
             player_ids = room["player_ids"]
-            if player_id not in player_ids:
-                yield event.plain_result("❌ 你不在这个房间里。")
+            if not self._check_player_in_room(event, player_id, player_ids):
                 return
             # 反查玩家在房间的编号
             player_index = player_ids.index(player_id)
@@ -373,7 +351,7 @@ class MengShouShaPlugin(Star):
             gamescene = game_scene.GameScene()
             scene_id, scene = gamescene.get_scene_from_room(room_id)
             if scene_id is None or scene is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
                 return
             # 检查游戏是否开始
             if scene["status"] != "游戏中":
@@ -401,30 +379,24 @@ class MengShouShaPlugin(Star):
             player_id = event.get_sender_id()
             player_name = event.get_sender_name()
             room_id = gameroom.get_player_room_unique(player_id)
-            if room_id is None:
-                yield event.plain_result("❌ 你不在任何房间中。")
-                return
-            # 校验房间是否存在
-            if gameroom.check_room_exist(room_id) is False:
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             # 检查玩家是否在房间里
             room = gameroom.get_room(room_id)
             player_ids = room["player_ids"]
-            if player_id not in player_ids:
-                yield event.plain_result("❌ 你不在这个房间里。")
+            if not self._check_player_in_room(event, player_id, player_ids):
                 return
             gamescene = game_scene.GameScene()
             scene_id, scene = gamescene.get_scene_from_room(room_id)
             if scene_id is None or scene is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
                 return
             dead_info = scene["dead_info"]
             # 查询位置
             gamemap = game_map.GameMap()
             map_id, map = gamemap.get_map_from_room(room_id)
             if map_id is None or map is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
                 return
             now_node_code, now_node_name = (
                 map["players_in_map_info"][player_id]["node_code"],
@@ -474,6 +446,83 @@ class MengShouShaPlugin(Star):
             logger.error(f"查询位置异常: {str(e)}", exc_info=True)
             yield event.plain_result("❌ 查询位置失败，请联系管理员。")
 
+    """
+        玩家会议下的技能指令
+        PLAYER SKILLS UNDER MEETING
+        0. 移动（任何不在死亡列表和被吃列表的玩家）
+        1. 铲除（带刀角色）
+        2. 吞噬（食肉动物）
+        3. 感染（哈卡）
+        4. 变脸（变脸杀手）
+        5. 隐身（隐身杀手）
+        6. 检查（花生侠）
+        7. 报警（任何人接触到尸体、刀到尖叫）
+        8. 进管道（工程侠、普通杀手）
+        9. 出管道（工程侠、普通杀手）
+        10. 静音（不打算做）
+    """
+    # 公共方法
+
+    def _check_room_status(
+        self, event: AstrMessageEvent, check_status: str, expected_status: str
+    ):
+        if check_status != expected_status:
+            yield event.plain_result(f"❌ 房间当前状态[{check_status}]不允许使用技能")
+            return False
+        return True
+
+    def _check_target_in_room(
+        self,
+        event: AstrMessageEvent,
+        target_player_id: str,
+        target_player_infos,
+        player_ids: List[str],
+    ):
+        if target_player_id not in player_ids:
+            yield event.plain_result(
+                f"❌ 目标玩家{target_player_infos}不在这个房间里。"
+            )
+            return False
+        return True
+
+    def _check_target_is_source(
+        self, event: AstrMessageEvent, source_player_id: str, target_player_id: str
+    ):
+        if source_player_id == target_player_id:
+            yield event.plain_result("❌ 你不能对自己使用技能。")
+            return True
+        return False
+
+    def _check_scene_status(
+        self, event: AstrMessageEvent, scene: dict, expected_status: str
+    ):
+        if scene["status"] != expected_status:
+            yield event.plain_result(
+                f"❌ 游戏当前状态[{scene['status']}]不允许使用技能"
+            )
+            return False
+
+    def _check_player_is_dead(
+        self, event: AstrMessageEvent, player_id: str, dead_info: List[str],
+        is_move: bool
+    ):
+        if player_id in dead_info:
+            if is_move:
+                yield event.plain_result("❌ 你已经死亡，无法移动。")
+            else:
+                yield event.plain_result("❌ 你已经死亡，无法使用技能。")
+            return True
+        return False
+    def _check_player_is_ate(
+        self, event: AstrMessageEvent, player_id: str, ate_info: List[str],
+        is_move: bool
+    ):
+        if player_id in ate_info:
+            if is_move:
+                yield event.plain_result("❌ 你已经被吃，无法移动。")
+            else:
+                yield event.plain_result("❌ 你已经被吃，无法使用技能。")
+            return True
     @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
     @meng.command("移动")  # type: ignore
     async def move(self, event: AstrMessageEvent, node_code_or_name: str):
@@ -483,18 +532,12 @@ class MengShouShaPlugin(Star):
             player_id = event.get_sender_id()
             player_name = event.get_sender_name()
             room_id = gameroom.get_player_room_unique(player_id)
-            if room_id is None:
-                yield event.plain_result("❌ 你不在任何房间中。")
-                return
-            # 校验房间是否存在
-            if gameroom.check_room_exist(room_id) is False:
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             # 检查玩家是否在房间里
             room = gameroom.get_room(room_id)
             player_ids = room["player_ids"]
-            if player_id not in player_ids:
-                yield event.plain_result("❌ 你不在这个房间里。")
+            if not self._check_player_in_room(event, player_id, player_ids):
                 return
             # 检查游戏是否开始
             if room["status"] != "游戏中":
@@ -504,18 +547,18 @@ class MengShouShaPlugin(Star):
             gamescene = game_scene.GameScene()
             scene_id, scene = gamescene.get_scene_from_room(room_id)
             if scene_id is None or scene is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
                 return
             dead_info = scene["dead_info"]
+            ate_info = scene["ate_info"]
             # TODO目前先不开发死后支持继续移动做任务功能
-            if player_id in dead_info:
-                yield event.plain_result("❌ 你已经死亡，无法移动。")
-                return
+            if self._check_player_is_dead(event, player_id, dead_info, True): return
+            if self._check_player_is_ate(event, player_id, ate_info, True): return
             gamemap = game_map.GameMap()
             # 获得玩家当前的node
             map_id, map = gamemap.get_map_from_room(room_id)
             if map_id is None or map is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
                 return
             now_node_code, now_node_name = (
                 map["players_in_map_info"][player_id]["node_code"],
@@ -554,47 +597,30 @@ class MengShouShaPlugin(Star):
             gameroom = game_room.GameRoom()
             source_player_id = event.get_sender_id()
             room_id = gameroom.get_player_room_unique(source_player_id)
-            # 检查玩家是否在房间里
-            if room_id is None:
-                yield event.plain_result("❌ 你不在任何房间中。")
-                return
-            # 校验房间是否存在
-            if gameroom.check_room_exist(room_id) is False:
-                yield event.plain_result("❌ 房间不存在，请检查房间号。")
+            if not self._check_room_exist(event, room_id) or room_id is None:
                 return
             room = gameroom.get_room(room_id)
             player_ids = room["player_ids"]
             target_player_id = player_ids[int(target_player_index) - 1]
             target_player_infos = room["player_infos"][int(target_player_index) - 1]
-            if source_player_id not in player_ids:
-                yield event.plain_result("❌ 你不在这个房间里。")
-                return
-            if target_player_id not in player_ids:
-                yield event.plain_result(
-                    f"❌ 目标玩家{target_player_infos}不在这个房间里。"
-                )
+            if not self._check_player_in_room(event, source_player_id, player_ids):
                 return
             # 检查游戏是否开始
-            if room["status"] != "游戏中":
-                yield event.plain_result(
-                    f"❌ 房间当前状态[{room['status']}]不允许使用技能"
-                )
+            if not self._check_room_status(event, room["status"], "游戏中"):
                 return
             # 检查玩家是否存活或者是否被吃
             gamescene = game_scene.GameScene()
             scene_id, scene = gamescene.get_scene_from_room(room["room_id"])
             if scene_id is None or scene is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
+                return
+            if not self._check_scene_status(event, scene, "会议下"):
                 return
             dead_info = scene["dead_info"]
             ate_info = scene["ate_info"]
             # TODO目前先不开发死后支持继续移动做任务功能
-            if source_player_id in dead_info:
-                yield event.plain_result("❌ 你已经死亡，无法使用技能。")
-                return
-            if source_player_id in ate_info:
-                yield event.plain_result("❌ 你已经被吃，无法使用技能。")
-                return
+            if self._check_player_is_dead(event, source_player_id, dead_info, False): return
+            if self._check_player_is_ate(event, source_player_id, ate_info, False): return
             # 检查玩家是否有这个技能
             role_info = scene["role_info"]
             player_role_code = role_info[source_player_id]
@@ -617,18 +643,17 @@ class MengShouShaPlugin(Star):
             else:
                 can_kill = False
             if not can_kill:
-                yield event.plain_result("❌ 你无法使用此技能")
+                yield event.plain_result("❌ 你无法使用铲除技能")
                 return
 
             #  检查是否是自己
-            if source_player_id == target_player_id:
-                yield event.plain_result("❌ 你不能对自己使用技能")
+            if self._check_target_is_source(event, source_player_id, target_player_id):
                 return
             # 检查是否在同一个node里
             gamemap = game_map.GameMap()
             map_id, map = gamemap.get_map_from_room(room["room_id"])
             if map_id is None or map is None:
-                yield event.plain_result("❌ 游戏未开始，请联系房主开始游戏。")
+                self._game_not_start(event)
                 return
             now_node_code, now_node_name = (
                 map["players_in_map_info"][source_player_id]["node_code"],
@@ -698,6 +723,275 @@ class MengShouShaPlugin(Star):
         except Exception as e:
             logger.error(f"铲除指令异常: {str(e)}", exc_info=True)
             yield event.plain_result("❌ 铲除指令失败，请联系管理员。")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @meng.command("吞噬", alias={"吃"})  # type: ignore
+    async def eat(self, event: AstrMessageEvent, target_player_index: str):
+        """处理食肉动物的吞噬技能指令"""
+        try:
+            gameroom = game_room.GameRoom()
+            source_player_id = event.get_sender_id()
+            room_id = gameroom.get_player_room_unique(source_player_id)
+            if not self._check_room_exist(event, room_id) or room_id is None:
+                return
+            room = gameroom.get_room(room_id)
+            player_ids = room["player_ids"]
+            target_player_id = player_ids[int(target_player_index) - 1]
+            target_player_infos = room["player_infos"][int(target_player_index) - 1]
+            if not self._check_player_in_room(event, source_player_id, player_ids):
+                return
+            if not self._check_target_in_room(
+                event, target_player_id, target_player_infos, player_ids
+            ):
+                return
+            # 检查游戏是否开始
+            if not self._check_room_status(event, room["status"], "游戏中"):
+                return
+            # 检查玩家是否存活或者是否被吃
+            gamescene = game_scene.GameScene()
+            scene_id, scene = gamescene.get_scene_from_room(room["room_id"])
+            if scene_id is None or scene is None:
+                self._game_not_start(event)
+                return
+            dead_info = scene["dead_info"]
+            ate_info = scene["ate_info"]
+            # TODO目前先不开发死后支持继续移动做任务功能
+            if self._check_player_is_dead(event, source_player_id, dead_info, False): return
+            if self._check_player_is_ate(event, source_player_id, ate_info, False): return
+            # 检查玩家是否有这个技能
+            role_info = scene["role_info"]
+            player_role_code = role_info[source_player_id]
+            # 是否是食肉动物
+            if player_role_code != game_roles.GameRoleEnum.CARNIVORE.value:
+                yield event.plain_result("❌ 只有食肉动物才能使用此技能!")
+                return
+            #  检查是否是自己
+            if self._check_target_is_source(event, source_player_id, target_player_id):
+                return
+            # 检查是否在同一个node里
+            gamemap = game_map.GameMap()
+            map_id, map = gamemap.get_map_from_room(room["room_id"])
+            if map_id is None or map is None:
+                self._game_not_start(event)
+                return
+            now_node_code, now_node_name = (
+                map["players_in_map_info"][source_player_id]["node_code"],
+                map["players_in_map_info"][source_player_id]["node_name"],
+            )
+            others_in_node = gamemap.get_players_in_node(
+                source_player_id, now_node_code
+            )
+            if target_player_id not in others_in_node:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}和您不在同一个位置, 吞噬失败"
+                )
+                return
+
+            # 检查目标玩家是否已经死亡或者被吃
+            if target_player_id in dead_info:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经死亡，无法使用技能。"
+                )
+                return
+            if target_player_id in ate_info:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经被您吞噬，请勿重复指令。"
+                )
+                return
+            # 检查目标玩家是否隐身
+            players_in_map_info = map["players_in_map_info"]
+            target_player_info = players_in_map_info[target_player_id]
+            if (
+                "isVisible" in target_player_info
+                and target_player_info["isVisible"] == False
+            ):
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经消失，无法使用技能。"
+                )
+                return
+            # 吞噬
+            gamescene.player_to_ate(scene_id, source_player_id, target_player_id)
+            yield event.plain_result(
+                f"🍖 成功吞噬{target_player_index}号玩家:{target_player_infos}"
+            )
+            # 吞噬尖叫
+            target_player_role_code = role_info[target_player_id]
+            if target_player_role_code == game_roles.GameRoleEnum.SCREAM.value:
+                gamescene.touch_body_alert(scene_id, source_player_id, target_player_id)
+        except Exception as e:
+            logger.error(f"吞噬指令异常: {str(e)}", exc_info=True)
+            yield event.plain_result("❌ 吞噬指令失败，请联系管理员。")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @meng.command("感染", alias={"摸"})  # type: ignore
+    async def infect(self, event: AstrMessageEvent, target_player_index: str):
+        """处理哈卡的感染技能指令"""
+        try:
+            gameroom = game_room.GameRoom()
+            source_player_id = event.get_sender_id()
+            room_id = gameroom.get_player_room_unique(source_player_id)
+            if not self._check_room_exist(event, room_id) or room_id is None:
+                return
+            room = gameroom.get_room(room_id)
+            player_ids = room["player_ids"]
+            target_player_id = player_ids[int(target_player_index) - 1]
+            target_player_infos = room["player_infos"][int(target_player_index) - 1]
+            if not self._check_player_in_room(event, source_player_id, player_ids):
+                return
+            if not self._check_target_in_room(
+                event, target_player_id, target_player_infos, player_ids
+            ):
+                return
+            # 检查游戏是否开始
+            if not self._check_room_status(event, room["status"], "游戏中"):
+                return
+            # 检查玩家是否存活或者是否被吃
+            gamescene = game_scene.GameScene()
+            scene_id, scene = gamescene.get_scene_from_room(room["room_id"])
+            if scene_id is None or scene is None:
+                self._game_not_start(event)
+                return
+            dead_info = scene["dead_info"]
+            ate_info = scene["ate_info"]
+            infected_info = scene["infected_info"]
+            # TODO目前先不开发死后支持继续移动做任务功能
+            if self._check_player_is_dead(event, source_player_id, dead_info, False): return
+            if self._check_player_is_ate(event, source_player_id, ate_info, False): return
+            # 检查玩家是否有这个技能
+            role_info = scene["role_info"]
+            player_role_code = role_info[source_player_id]
+            # 是否是哈卡
+            if player_role_code != game_roles.GameRoleEnum.HAKA.value:
+                yield event.plain_result("❌ 只有哈卡才能使用此技能!")
+                return
+            #  检查是否是自己
+            if self._check_target_is_source(event, source_player_id, target_player_id):
+                return
+            # 检查是否在同一个node里
+            gamemap = game_map.GameMap()
+            map_id, map = gamemap.get_map_from_room(room["room_id"])
+            if map_id is None or map is None:
+                self._game_not_start(event)
+                return
+            now_node_code, now_node_name = (
+                map["players_in_map_info"][source_player_id]["node_code"],
+                map["players_in_map_info"][source_player_id]["node_name"],
+            )
+            others_in_node = gamemap.get_players_in_node(
+                source_player_id, now_node_code
+            )
+            if target_player_id not in others_in_node:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}和您不在同一个位置, 感染失败"
+                )
+                return
+
+            # 检查目标玩家是否已经死亡或者被吃
+            if target_player_id in dead_info:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经死亡，无法使用技能。"
+                )
+                return
+            if target_player_id in ate_info:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经消失，无法使用技能。"
+                )
+                return
+            if target_player_id in infected_info:
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经被感染，请勿重复指令。"
+                )
+                return
+            # 检查目标玩家是否隐身
+            players_in_map_info = map["players_in_map_info"]
+            target_player_info = players_in_map_info[target_player_id]
+            if (
+                "isVisible" in target_player_info
+                and target_player_info["isVisible"] == False
+            ):
+                yield event.plain_result(
+                    f"❌ 目标玩家{target_player_infos}已经消失，无法使用技能。"
+                )
+                return
+            # 感染
+            gamescene.player_to_infected(scene_id, source_player_id, target_player_id)
+            yield event.plain_result(
+                f"🤒 成功感染{target_player_index}号玩家:{target_player_infos}"
+            )
+        except Exception as e:
+            logger.error(f"感染指令异常: {str(e)}", exc_info=True)
+            yield event.plain_result("❌ 感染指令失败，请联系管理员。")
+
+    @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+    @meng.command("变脸", alias={"变", "变身"})  # type: ignore
+    async def change(self, event: AstrMessageEvent, target_player_index: str):
+        """处理变脸杀手的变脸技能指令"""
+        try:
+            gameroom = game_room.GameRoom()
+            source_player_id = event.get_sender_id()
+            room_id = gameroom.get_player_room_unique(source_player_id)
+            if not self._check_room_exist(event, room_id) or room_id is None:
+                return
+            room = gameroom.get_room(room_id)
+            player_ids = room["player_ids"]
+            target_player_id = player_ids[int(target_player_index) - 1]
+            target_player_infos = room["player_infos"][int(target_player_index) - 1]
+            if not self._check_player_in_room(event, source_player_id, player_ids):
+                return
+            if not self._check_target_in_room(
+                event, target_player_id, target_player_infos, player_ids
+            ):
+                return
+            # 检查游戏是否开始
+            if not self._check_room_status(event, room["status"], "游戏中"):
+                return
+            # 检查玩家是否存活或者是否被吃
+            gamescene = game_scene.GameScene()
+            scene_id, scene = gamescene.get_scene_from_room(room["room_id"])
+            if scene_id is None or scene is None:
+                self._game_not_start(event)
+                return
+            dead_info = scene["dead_info"]
+            ate_info = scene["ate_info"]
+            # TODO目前先不开发死后支持继续移动做任务功能
+            if self._check_player_is_dead(event, source_player_id, dead_info, False): return
+            if self._check_player_is_ate(event, source_player_id, ate_info, False): return
+            # 检查玩家是否有这个技能
+            role_info = scene["role_info"]
+            player_role_code = role_info[source_player_id]
+            # 是否是变脸杀手
+            if player_role_code!= game_roles.GameRoleEnum.VARIETY_KILLER.value:
+                yield event.plain_result("❌ 只有变脸杀手才能使用此技能!")
+                return
+            #  检查是否是自己
+            if self._check_target_is_source(event, source_player_id, target_player_id):
+                return
+            # 原版的变脸需要在身边才能采样变脸, 很不方便, 我决定去掉这个限制, 可以自由在会议下变脸成任何玩家
+            # # 检查是否在同一个node里
+            # gamemap = game_map.GameMap()
+            # map_id, map = gamemap.get_map_from_room(room["room_id"])
+            # if map_id is None or map is None:
+            #     self._game_not_start(event)
+            #     return
+            # now_node_code, now_node_name = (
+            #     map["players_in_map_info"][source_player_id]["node_code"], 
+            #     map["players_in_map_info"][source_player_id]["node_name"],
+            # )
+            # others_in_node = gamemap.get_players_in_node(
+            #     source_player_id, now_node_code 
+            # )
+            # if target_player_id not in others_in_node:
+            #     yield event.plain_result(
+            #         f"❌ 目标玩家{target_player_infos}和您不在同一个位置, 变脸失败"
+            #     )
+            #     return
+            
+            # 变脸成目标角色
+            
+            
+        except Exception as e:
+            logger.error(f"变脸指令异常: {str(e)}", exc_info=True)
+            yield event.plain_result("❌ 变脸指令失败，请联系管理员。")
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""

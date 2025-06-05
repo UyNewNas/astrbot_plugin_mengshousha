@@ -1,4 +1,4 @@
-from .sp_mengshousha import DataMengShouSha
+from .data_mengshousha import DataMengShouSha
 
 spm = DataMengShouSha()
 

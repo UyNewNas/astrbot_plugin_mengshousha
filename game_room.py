@@ -8,7 +8,7 @@ Description:
 """
 
 import time
-from .sp_mengshousha import DataMengShouSha
+from .data_mengshousha import DataMengShouSha
 
 spm = DataMengShouSha()
 
@@ -17,10 +17,11 @@ class GameRoom:
     def __init__(self):
         pass
 
-    def create_new_room(self, owner_id: str, owner_name: str):
+    def create_new_room(self, owner_id: str, owner_name: str, group_id: str):
         room_id = spm.generate_6digit_id()
         new_room = {
             "room_id": room_id,
+            "group_id": group_id,
             "player_ids": [owner_id],
             "player_infos": [f"{owner_name}({owner_id})"],
             "players_in_game": {

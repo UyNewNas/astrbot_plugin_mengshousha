@@ -27,7 +27,7 @@ GameRoleConstDict = {
 
 # name = value
 class GameRoleEnum(Enum):
-    GOODMAN = list(range(0, 10 + 1)).append(20)
+    GOODMAN = list(range(0, 10 + 1)) + [20]
     GOODMAN_CAN_V = [3, 4, 5]
     # 普通良民
     ORDINARY = 0

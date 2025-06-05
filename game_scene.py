@@ -1,9 +1,9 @@
 from enum import Enum
-from .sp_mengshousha import DataMengShouSha
+from .data_mengshousha import DataMengShouSha
 
 spm = DataMengShouSha()
 roleCountConfig = {
-    3: {"Good": 1, "Bad": 1, "Neutral": 1},
+    # 3: {"Good": 1, "Bad": 1, "Neutral": 1}, // 3人测试用模板
     8: {"Good": 5, "Bad": 2, "Neutral": 1},
     9: {"Good": 6, "Bad": 2, "Neutral": 1},
     10: {"Good": 6, "Bad": 2, "Neutral": 2},
@@ -13,9 +13,10 @@ roleCountConfig = {
 
 
 class GameSceneEnum(Enum):  # 游戏场景状态机
+    WAITING_FOR_ASSIGN_ROLE = "待分配角色"
     WAITING = "等待中"
-    STARTING = "游戏中"
-    MEETING = "会议中"
+    UNDER_MEETING = "会议下"
+    IN_MEETING = "会议中"
     ENDING = "结束"
 
 
@@ -25,20 +26,22 @@ class GameScene:
 
     def create_new_scene(self, room_id: str, player_ids: list):
         scene_id = spm.generate_6digit_id()
+        status = GameSceneEnum.WAITING_FOR_ASSIGN_ROLE.value
         new_scene = {
             "scene_id": scene_id,
             "room_id": room_id,
             "player_ids": player_ids,
-            "status": "待分配角色",
+            "status": status,
             "count": len(player_ids),
             "role_info": {},
             "ate_info": [],
             "dead_info": [],
             "dead_info_in_this_meeting": [],
+            "infected_info": [],
             "meeting": {},
         }
         spm.update_game_scene(scene_id, new_scene)
-        return "待分配角色", scene_id, new_scene
+        return status, scene_id, new_scene
 
     def get_game_scene(self, scene_id: str):
         return spm.get_game_scene(scene_id)
@@ -94,7 +97,7 @@ class GameScene:
         for index, player in enumerate(neutralPlayerList):
             scene["role_info"][player] = neutralRoleList[index]
 
-        scene["status"] = "游戏中"
+        scene["status"] = GameSceneEnum.UNDER_MEETING.value
         spm.update_game_scene(scene_id, scene)
         return scene["status"], scene["role_info"]
 
@@ -119,6 +122,14 @@ class GameScene:
         spm.update_game_scene(scene_id, scene)
         return True
 
+    def player_to_infected(
+        self, scene_id: str, source_player_id: str, target_player_id: str
+    ):
+        scene = spm.get_game_scene(scene_id)
+        scene["infected_info"].append(
+            {"source_player_id": source_player_id, "target_player_id": target_player_id}
+        )
+
     def clear_ate_info(self, scene_id: str):
         scene = spm.get_game_scene(scene_id)
         scene["ate_info"] = []
@@ -135,7 +146,7 @@ class GameScene:
             "target_player_id": target_player_id,
             "dead_player_ids": scene["dead_info_in_this_meeting"],
         }
-        scene["status"] = "会议中"
+        scene["status"] = GameSceneEnum.IN_MEETING.value
         spm.update_game_scene(scene_id, scene)
         return True
 
